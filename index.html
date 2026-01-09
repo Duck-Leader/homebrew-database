@@ -36,6 +36,9 @@
 				<button id="importBtn">Import JSON</button>
 			</label>
 			<button id="resetBtn" title="Reset to sample data">Reset</button>
+			<!-- admin controls -->
+			<button id="adminBtn">Admin login</button>
+			<span id="adminStatus" class="small"></span>
 		</div>
 	</header>
 
@@ -64,6 +67,11 @@
 			<label style="display:inline-flex; align-items:center; gap:8px;">
 				<input id="romFile" type="file" accept=".nes,.sfc,.smc,.smd,.gb,.gbc,.gba,.bin,.iso,.zip" title="Upload ROM file (required)" required>
 				<span class="small">ROM file (required)</span>
+			</label>
+			<!-- publish immediately option (admin only) -->
+			<label style="display:inline-flex; align-items:center; gap:8px;">
+				<input id="publishNow" type="checkbox" title="Publish immediately (admin only)">
+				<span class="small">Publish now</span>
 			</label>
 		</div>
 		<div style="margin-top:8px;">
@@ -113,6 +121,21 @@
 	let db = []; // always fetched from server
 	let filters = { q: '', console: '', minYear: null, maxYear: null };
 
+	// demo admin token (DEMO ONLY). Replace with proper auth in a real app.
+	const ADMIN_TOKEN = 'admin-demo-token';
+
+	let isAdmin = false;
+	function updateAdminUI() {
+		isAdmin = !!localStorage.getItem('adminToken');
+		document.getElementById('adminBtn').textContent = isAdmin ? 'Logout admin' : 'Admin login';
+		document.getElementById('adminStatus').textContent = isAdmin ? ' (admin)' : '';
+		// enable publishNow checkbox only for admin
+		el.publishNow = document.getElementById('publishNow');
+		if (el.publishNow) el.publishNow.disabled = !isAdmin;
+		// hide Add toggle for non-admins? We allow submissions from non-admins but they are pending.
+		el.addToggle.textContent = isAdmin ? 'Add entry' : 'Submit entry';
+	}
+
 	// fetch list from server (server supports filtering)
 	async function fetchGames() {
 		const params = new URLSearchParams();
@@ -120,6 +143,8 @@
 		if (filters.console) params.set('console', filters.console);
 		if (filters.minYear != null) params.set('minYear', String(filters.minYear));
 		if (filters.maxYear != null) params.set('maxYear', String(filters.maxYear));
+		// request pending entries when admin
+		if (isAdmin) params.set('includePending', '1');
 		const res = await fetch(API_BASE + '/api/games' + (params.toString() ? ('?' + params.toString()) : ''));
 		if (!res.ok) { alert('Failed to fetch games'); return; }
 		db = await res.json();
@@ -134,32 +159,66 @@
 	// render uses server-provided metadata; file downloads use /api/games/:id/file
 	function renderResults() {
 		el.results.innerHTML = '';
-		const filtered = db.slice().sort((a,b)=> (b.year||0)-(a.year||0));
-		el.resultCount.textContent = filtered.length;
-		if (!filtered.length) { el.results.innerHTML = '<div class="small">No results.</div>'; return; }
-		filtered.forEach(it => {
+		// show only approved entries to non-admins
+		const visible = db.slice().filter(it => isAdmin || it.status === 'approved').sort((a,b)=> (b.year||0)-(a.year||0));
+		el.resultCount.textContent = visible.length;
+		if (!visible.length) { el.results.innerHTML = '<div class="small">No results.</div>'; return; }
+		visible.forEach(it => {
 			const div = document.createElement('div'); div.className = 'card';
-			const downloadLink = it.fileName
+			const downloadLink = (it.fileName && (isAdmin || it.status === 'approved'))
 				? `<a href="/api/games/${it.id}/file" download="${encodeURIComponent(it.fileName)}">Download</a>`
-				: (it.downloadUrl ? `<a href="${escapeAttr(it.downloadUrl)}" target="_blank">Download</a>` : '');
+				: (it.downloadUrl && (isAdmin || it.status === 'approved') ? `<a href="${escapeAttr(it.downloadUrl)}" target="_blank">Download</a>` : '');
+			const statusBadge = it.status && it.status !== 'approved' ? `<span class="small" style="margin-left:8px;color:#b66">${escapeHtml(it.status)}</span>` : '';
+			let actions = '';
+			if (isAdmin) {
+				// admin sees control buttons for pending/approved
+				if (it.status === 'pending') {
+					actions += `<button data-id="${it.id}" class="approveBtn">Approve</button>`;
+					actions += `<button data-id="${it.id}" class="rejectBtn">Reject</button>`;
+				}
+				actions += `<button data-id="${it.id}" class="delBtn">Delete</button>`;
+			} else {
+				// non-admin: no delete; show nothing special
+			}
 			div.innerHTML = `
-				<div><strong>${escapeHtml(it.title)}</strong></div>
+				<div><strong>${escapeHtml(it.title)}</strong>${statusBadge}</div>
 				<div class="meta">${escapeHtml(it.console)} • ${it.year || 'n/a'} • ${escapeHtml(it.developer || '')}</div>
 				<div class="small" style="margin-top:8px">${escapeHtml(it.description || '')}</div>
 				<div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
 					${downloadLink}
-					<button data-id="${it.id}" class="delBtn">Delete</button>
+					${actions}
 				</div>
 			`;
 			el.results.appendChild(div);
 		});
-		// attach delete handlers
+		// attach admin-only handlers
 		document.querySelectorAll('.delBtn').forEach(b => {
 			b.addEventListener('click', async ev => {
+				if (!isAdmin) { alert('Only admin can delete entries.'); return; }
 				const id = Number(ev.currentTarget.dataset.id);
 				if (!confirm('Delete this entry?')) return;
 				const res = await fetch(`/api/games/${id}`, { method: 'DELETE' });
 				if (!res.ok) { alert('Delete failed'); return; }
+				await fetchGames();
+			});
+		});
+		document.querySelectorAll('.approveBtn').forEach(b => {
+			b.addEventListener('click', async ev => {
+				if (!isAdmin) { alert('Only admin can approve entries.'); return; }
+				const id = Number(ev.currentTarget.dataset.id);
+				const res = await fetch(`/api/games/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'approved' }) });
+				if (!res.ok) { alert('Approve failed'); return; }
+				await fetchGames();
+			});
+		});
+		document.querySelectorAll('.rejectBtn').forEach(b => {
+			b.addEventListener('click', async ev => {
+				if (!isAdmin) { alert('Only admin can reject entries.'); return; }
+				const id = Number(ev.currentTarget.dataset.id);
+				if (!confirm('Reject (remove) this pending entry?')) return;
+				// mark as rejected (server may delete instead)
+				const res = await fetch(`/api/games/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'rejected' }) });
+				if (!res.ok) { alert('Reject failed'); return; }
 				await fetchGames();
 			});
 		});
@@ -190,6 +249,26 @@
 		const blob = await res.blob();
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a'); a.href = url; a.download = 'homebrew_db.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+	});
+
+	// admin login/logout
+	document.getElementById('adminBtn').addEventListener('click', async () => {
+		if (isAdmin) {
+			localStorage.removeItem('adminToken');
+			updateAdminUI();
+			await fetchGames();
+			return;
+		}
+		const token = prompt('Enter admin token (demo):');
+		if (!token) return;
+		if (token === ADMIN_TOKEN) {
+			localStorage.setItem('adminToken', token);
+			updateAdminUI();
+			await fetchGames();
+			alert('Admin mode enabled (demo).');
+		} else {
+			alert('Invalid token.');
+		}
 	});
 
 	// import JSON file -> POST /api/games/import
@@ -235,6 +314,9 @@
 		fd.set('title', title); fd.set('console', c); fd.set('year', String(y));
 		fd.set('developer', el.developer.value.trim()); fd.set('description', el.description.value.trim()); fd.set('downloadUrl', el.downloadUrl.value.trim());
 		fd.set('rom', file);
+		// status: admin can publish immediately; non-admin submissions are pending
+		const publishNow = (el.publishNow && el.publishNow.checked) && isAdmin;
+		fd.set('status', publishNow ? 'approved' : 'pending');
 		el.addSave.disabled = true;
 		try {
 			const res = await fetch('/api/games', { method: 'POST', body: fd });
@@ -244,6 +326,8 @@
 			}
 			el.addForm.reset(); el.addForm.classList.add('hidden');
 			await fetchGames();
+			if (publishNow) alert('Added and published.');
+			else alert('Submitted for review. An administrator must approve it before it appears publicly.');
 		} catch (err) {
 			alert('Add failed: ' + err.message);
 		} finally {
@@ -251,16 +335,20 @@
 		}
 	});
 
+	// renderConsoleOptions: use visible entries (admins see pending as well)
 	function renderConsoleOptions() {
-		const list = uniqueConsoles();
+		const list = (isAdmin ? db : db.filter(x => x.status === 'approved')).map(x => x.console).filter(Boolean);
+		const set = new Set(list);
+		const arr = Array.from(set).sort();
 		el.consoleSelect.innerHTML = '<option value="">All consoles</option>';
-		list.forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.textContent = c; el.consoleSelect.appendChild(opt); });
-		const years = db.map(x => x.year).filter(y => Number.isFinite(y)); if (years.length) { el.minYear.placeholder = Math.min(...years); el.maxYear.placeholder = Math.max(...years); }
+		arr.forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.textContent = c; el.consoleSelect.appendChild(opt); });
+		const years = (isAdmin ? db : db.filter(x => x.status === 'approved')).map(x => x.year).filter(y => Number.isFinite(y)); if (years.length) { el.minYear.placeholder = Math.min(...years); el.maxYear.placeholder = Math.max(...years); }
 	}
 
-	function applyAndRender() { renderConsoleOptions(); renderResults(); }
+	function applyAndRender() { updateAdminUI(); renderConsoleOptions(); renderResults(); }
 
 	// initial load
+	updateAdminUI();
 	fetchGames();
 </script>
 </body>
