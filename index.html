@@ -52,13 +52,19 @@
 		<span class="small">Results: <span id="resultCount" class="count">0</span></span>
 	</div>
 
+	<!-- Add a file input to the add form -->
 	<form id="addForm" class="hidden" onsubmit="return false;">
 		<div style="display:flex; gap:8px; flex-wrap:wrap;">
-			<input id="title" placeholder="Title" required>
-			<input id="console" placeholder="Console (e.g., NES, Genesis)" required>
-			<input id="year" type="number" placeholder="Year" style="width:110px" required>
+			<input id="title" placeholder="Title (required)" required>
+			<input id="console" placeholder="Console (e.g., NES, Genesis) (required)" required>
+			<input id="year" type="number" placeholder="Year (required)" style="width:110px" required>
 			<input id="developer" placeholder="Developer" >
 			<input id="downloadUrl" placeholder="Download URL (optional)" style="min-width:220px;">
+			<!-- ROM file now required -->
+			<label style="display:inline-flex; align-items:center; gap:8px;">
+				<input id="romFile" type="file" accept=".nes,.sfc,.smc,.smd,.gb,.gbc,.gba,.bin,.iso,.zip" title="Upload ROM file (required)" required>
+				<span class="small">ROM file (required)</span>
+			</label>
 		</div>
 		<div style="margin-top:8px;">
 			<textarea id="description" placeholder="Short description"></textarea>
@@ -77,19 +83,8 @@
 </div>
 
 <script>
-	// ...existing code...
-	// Sample data (keeps it small and legal)
-	const SAMPLE_DB = [
-		{ id: 1, title: "Solar Blaze", console: "NES", year: 2019, developer: "RetroDev", description: "Side-scrolling shooter homebrew.", downloadUrl: "" },
-		{ id: 2, title: "Pixel Quest", console: "Game Boy", year: 2021, developer: "IndieTeam", description: "An RPG made for old hardware.", downloadUrl: "" },
-		{ id: 3, title: "Mega Kart Homebrew", console: "Genesis", year: 2018, developer: "KartLab", description: "Arcade racing on classic console.", downloadUrl: "" },
-		{ id: 4, title: "StarForth", console: "NES", year: 2023, developer: "NewWave", description: "Platformer in the style of classic 8-bit.", downloadUrl: "" }
-	];
-
-	const STORAGE_KEY = 'homebrew_db_v1';
-	let db = loadDb();
-	let filters = { q: '', console: '', minYear: null, maxYear: null };
-
+	const API_BASE = ''; // same origin
+	// element refs + filters
 	const el = {
 		search: document.getElementById('searchInput'),
 		consoleSelect: document.getElementById('consoleSelect'),
@@ -111,20 +106,24 @@
 		year: document.getElementById('year'),
 		developer: document.getElementById('developer'),
 		downloadUrl: document.getElementById('downloadUrl'),
-		description: document.getElementById('description')
+		description: document.getElementById('description'),
+		romFile: document.getElementById('romFile'),
+		searchInput: document.getElementById('searchInput')
 	};
+	let db = []; // always fetched from server
+	let filters = { q: '', console: '', minYear: null, maxYear: null };
 
-	function loadDb() {
-		try {
-			const raw = localStorage.getItem(STORAGE_KEY);
-			if (raw) return JSON.parse(raw);
-		} catch (e) { /* ignore */ }
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(SAMPLE_DB));
-		return JSON.parse(JSON.stringify(SAMPLE_DB));
-	}
-
-	function saveDb() {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+	// fetch list from server (server supports filtering)
+	async function fetchGames() {
+		const params = new URLSearchParams();
+		if (filters.q) params.set('q', filters.q);
+		if (filters.console) params.set('console', filters.console);
+		if (filters.minYear != null) params.set('minYear', String(filters.minYear));
+		if (filters.maxYear != null) params.set('maxYear', String(filters.maxYear));
+		const res = await fetch(API_BASE + '/api/games' + (params.toString() ? ('?' + params.toString()) : ''));
+		if (!res.ok) { alert('Failed to fetch games'); return; }
+		db = await res.json();
+		applyAndRender();
 	}
 
 	function uniqueConsoles() {
@@ -132,52 +131,23 @@
 		return Array.from(set).sort();
 	}
 
-	function minMaxYear() {
-		const years = db.map(x => x.year).filter(y => Number.isFinite(y));
-		return { min: Math.min(...years), max: Math.max(...years) };
-	}
-
-	function renderConsoleOptions() {
-		const list = uniqueConsoles();
-		el.consoleSelect.innerHTML = '<option value="">All consoles</option>';
-		list.forEach(c => {
-			const opt = document.createElement('option'); opt.value = c; opt.textContent = c; el.consoleSelect.appendChild(opt);
-		});
-		// set year placeholders to data range
-		const {min, max} = minMaxYear();
-		if (Number.isFinite(min)) el.minYear.placeholder = min;
-		if (Number.isFinite(max)) el.maxYear.placeholder = max;
-	}
-
-	function matchesFilters(item) {
-		// text search
-		const q = filters.q.trim().toLowerCase();
-		if (q) {
-			const hay = (item.title + ' ' + (item.developer||'') + ' ' + (item.description||'')).toLowerCase();
-			if (!hay.includes(q)) return false;
-		}
-		if (filters.console && item.console !== filters.console) return false;
-		if (filters.minYear && item.year < filters.minYear) return false;
-		if (filters.maxYear && item.year > filters.maxYear) return false;
-		return true;
-	}
-
+	// render uses server-provided metadata; file downloads use /api/games/:id/file
 	function renderResults() {
 		el.results.innerHTML = '';
-		const filtered = db.filter(matchesFilters).sort((a,b)=> (b.year||0)-(a.year||0));
+		const filtered = db.slice().sort((a,b)=> (b.year||0)-(a.year||0));
 		el.resultCount.textContent = filtered.length;
-		if (!filtered.length) {
-			el.results.innerHTML = '<div class="small">No results.</div>';
-			return;
-		}
+		if (!filtered.length) { el.results.innerHTML = '<div class="small">No results.</div>'; return; }
 		filtered.forEach(it => {
 			const div = document.createElement('div'); div.className = 'card';
+			const downloadLink = it.fileName
+				? `<a href="/api/games/${it.id}/file" download="${encodeURIComponent(it.fileName)}">Download</a>`
+				: (it.downloadUrl ? `<a href="${escapeAttr(it.downloadUrl)}" target="_blank">Download</a>` : '');
 			div.innerHTML = `
 				<div><strong>${escapeHtml(it.title)}</strong></div>
 				<div class="meta">${escapeHtml(it.console)} • ${it.year || 'n/a'} • ${escapeHtml(it.developer || '')}</div>
 				<div class="small" style="margin-top:8px">${escapeHtml(it.description || '')}</div>
 				<div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-					${it.downloadUrl ? `<a href="${escapeAttr(it.downloadUrl)}" target="_blank">Download</a>` : ''}
+					${downloadLink}
 					<button data-id="${it.id}" class="delBtn">Delete</button>
 				</div>
 			`;
@@ -185,46 +155,44 @@
 		});
 		// attach delete handlers
 		document.querySelectorAll('.delBtn').forEach(b => {
-			b.addEventListener('click', ev => {
+			b.addEventListener('click', async ev => {
 				const id = Number(ev.currentTarget.dataset.id);
 				if (!confirm('Delete this entry?')) return;
-				db = db.filter(x => x.id !== id);
-				saveDb();
-				applyAndRender();
+				const res = await fetch(`/api/games/${id}`, { method: 'DELETE' });
+				if (!res.ok) { alert('Delete failed'); return; }
+				await fetchGames();
 			});
 		});
 	}
 
 	// utilities
 	function escapeHtml(s = '') { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-	function escapeAttr(s=''){ return s.replace(/"/g, '%22'); }
+	function escapeAttr(s=''){ return String(s).replace(/"/g, '%22'); }
 
-	// events & behaviors
+	// event wiring (use server endpoints)
 	let searchTimer = null;
-	el.search.addEventListener('input', () => {
+	el.searchInput.addEventListener('input', () => {
 		clearTimeout(searchTimer);
-		searchTimer = setTimeout(()=>{ filters.q = el.search.value; applyAndRender(); }, 200);
+		searchTimer = setTimeout(()=>{ filters.q = el.searchInput.value; fetchGames(); }, 200);
 	});
-	el.consoleSelect.addEventListener('change', () => { filters.console = el.consoleSelect.value; applyAndRender(); });
-	el.minYear.addEventListener('change', () => {
-		filters.minYear = el.minYear.value ? Number(el.minYear.value) : null;
-		applyAndRender();
-	});
-	el.maxYear.addEventListener('change', () => {
-		filters.maxYear = el.maxYear.value ? Number(el.maxYear.value) : null;
-		applyAndRender();
-	});
+	el.consoleSelect.addEventListener('change', () => { filters.console = el.consoleSelect.value; fetchGames(); });
+	el.minYear.addEventListener('change', () => { filters.minYear = el.minYear.value ? Number(el.minYear.value) : null; fetchGames(); });
+	el.maxYear.addEventListener('change', () => { filters.maxYear = el.maxYear.value ? Number(el.maxYear.value) : null; fetchGames(); });
 	el.clearFilters.addEventListener('click', () => {
-		el.search.value = ''; el.consoleSelect.value = ''; el.minYear.value = ''; el.maxYear.value = '';
+		el.searchInput.value = ''; el.consoleSelect.value = ''; el.minYear.value = ''; el.maxYear.value = '';
 		filters = { q: '', console: '', minYear: null, maxYear: null };
-		applyAndRender();
+		fetchGames();
 	});
-	el.exportBtn.addEventListener('click', () => {
-		const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
+
+	el.exportBtn.addEventListener('click', async () => {
+		const res = await fetch('/api/games/export');
+		if (!res.ok) { alert('Export failed'); return; }
+		const blob = await res.blob();
 		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url; a.download = 'homebrew_db.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+		const a = document.createElement('a'); a.href = url; a.download = 'homebrew_db.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 	});
+
+	// import JSON file -> POST /api/games/import
 	el.importBtn.addEventListener('click', () => el.importFile.click());
 	el.importFile.addEventListener('change', async (ev) => {
 		const f = ev.target.files && ev.target.files[0];
@@ -233,55 +201,67 @@
 			const text = await f.text();
 			const parsed = JSON.parse(text);
 			if (!Array.isArray(parsed)) throw new Error('Invalid file format');
-			db = parsed.map((x, i) => ({ id: x.id || Date.now()+i, title: x.title||'', console: x.console||'', year: x.year||null, developer: x.developer||'', description: x.description||'', downloadUrl: x.downloadUrl||'' }));
-			saveDb();
-			applyAndRender();
-			alert('Imported ' + db.length + ' entries.');
+			const res = await fetch('/api/games/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) });
+			if (!res.ok) throw new Error('Import failed');
+			await fetchGames();
+			alert('Imported ' + parsed.length + ' entries.');
 		} catch (e) {
 			alert('Import failed: ' + e.message);
 		}
 		ev.target.value = '';
 	});
-	el.resetBtn.addEventListener('click', () => {
-		if (!confirm('Reset local data to sample dataset?')) return;
-		db = JSON.parse(JSON.stringify(SAMPLE_DB));
-		saveDb();
-		applyAndRender();
+
+	el.resetBtn.addEventListener('click', async () => {
+		if (!confirm('Reset server DB to sample dataset?')) return;
+		const res = await fetch('/api/games/reset', { method: 'POST' });
+		if (!res.ok) { alert('Reset failed'); return; }
+		await fetchGames();
 	});
 
-	// Add form behavior
-	el.addToggle.addEventListener('click', () => {
-		el.addForm.classList.toggle('hidden');
-	});
-	el.addCancel.addEventListener('click', () => {
-		el.addForm.classList.add('hidden');
-	});
-	el.addSave.addEventListener('click', () => {
+	// Add form: POST /api/games with multipart form-data (rom file optional)
+	el.addToggle.addEventListener('click', () => el.addForm.classList.toggle('hidden'));
+	el.addCancel.addEventListener('click', () => el.addForm.classList.add('hidden'));
+	el.addSave.addEventListener('click', async () => {
 		const title = el.title.value.trim(); const c = el.consoleInput.value.trim();
-		const y = Number(el.year.value); if (!title || !c || !Number.isFinite(y)) { alert('please fill title, console, numeric year'); return; }
-		const newOne = {
-			id: Date.now(),
-			title,
-			console: c,
-			year: y,
-			developer: el.developer.value.trim(),
-			description: el.description.value.trim(),
-			downloadUrl: el.downloadUrl.value.trim()
-		};
-		db.push(newOne);
-		saveDb();
-		el.addForm.reset();
-		el.addForm.classList.add('hidden');
-		applyAndRender();
+		const y = Number(el.year.value);
+		if (!title || !c || !Number.isFinite(y)) { alert('Please fill Title, Console and a numeric Year.'); return; }
+		// require ROM file
+		const file = el.romFile && el.romFile.files && el.romFile.files[0];
+		if (!file) { alert('Please select a ROM file.'); return; }
+		// simple client-side safety checks
+		const MAX_SIZE = 200 * 1024 * 1024; // 200MB
+		if (file.size > MAX_SIZE) { alert('ROM file too large (max 200MB).'); return; }
+		const fd = new FormData();
+		fd.set('title', title); fd.set('console', c); fd.set('year', String(y));
+		fd.set('developer', el.developer.value.trim()); fd.set('description', el.description.value.trim()); fd.set('downloadUrl', el.downloadUrl.value.trim());
+		fd.set('rom', file);
+		el.addSave.disabled = true;
+		try {
+			const res = await fetch('/api/games', { method: 'POST', body: fd });
+			if (!res.ok) {
+				const body = await res.json().catch(()=>({ error: 'Upload failed' }));
+				throw new Error(body && body.error ? body.error : 'Add failed');
+			}
+			el.addForm.reset(); el.addForm.classList.add('hidden');
+			await fetchGames();
+		} catch (err) {
+			alert('Add failed: ' + err.message);
+		} finally {
+			el.addSave.disabled = false;
+		}
 	});
 
-	function applyAndRender() {
-		renderConsoleOptions();
-		renderResults();
+	function renderConsoleOptions() {
+		const list = uniqueConsoles();
+		el.consoleSelect.innerHTML = '<option value="">All consoles</option>';
+		list.forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.textContent = c; el.consoleSelect.appendChild(opt); });
+		const years = db.map(x => x.year).filter(y => Number.isFinite(y)); if (years.length) { el.minYear.placeholder = Math.min(...years); el.maxYear.placeholder = Math.max(...years); }
 	}
 
-	// initial render
-	applyAndRender();
+	function applyAndRender() { renderConsoleOptions(); renderResults(); }
+
+	// initial load
+	fetchGames();
 </script>
 </body>
 </html>
