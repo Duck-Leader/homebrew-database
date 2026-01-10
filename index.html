@@ -159,6 +159,10 @@
 	// robust status check: support strings (case-insensitive), booleans, and approved/pending flags
 	function statusIs(item, want) {
 		if (!item) return false;
+		// back-compat: if there is no status/approved/pending information, treat as approved
+		if (item.status == null && item.approved == null && item.pending == null) {
+			return want === 'approved';
+		}
 		const s = item && item.status;
 		// string status
 		if (typeof s === 'string') return s.toLowerCase() === String(want).toLowerCase();
@@ -168,7 +172,6 @@
 		if (want === 'approved') {
 			if (item.approved === true) return true;
 			if (item.pending === false) return true;
-			// maybe status missing but there's an 'state' or other flag? fallthrough to false
 			return false;
 		}
 		if (want === 'pending') {
