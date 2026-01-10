@@ -93,11 +93,13 @@
 
 	<div class="footer">
 		<p>Server-backed demo: entries are stored on the server. Use Export/Import to back up or migrate data.</p>
+		<div id="debugInfo" class="small" style="margin-top:8px; display:none;"></div>
 	</div>
 </div>
 
 <script>
 	const API_BASE = ''; // same origin
+	const DEBUG = new URL(location.href).searchParams.has('debug');
 	// element refs + filters
 	const el = {
 		search: document.getElementById('searchInput'),
@@ -162,10 +164,37 @@
 		// request pending entries when admin
 		if (isAdmin) params.set('includePending', '1');
 		const url = API_BASE + '/api/games' + (params.toString() ? ('?' + params.toString()) : '');
-		const res = await fetch(url, { headers: getAuthHeaders() });
-		if (!res.ok) { alert('Failed to fetch games'); return; }
-		db = await res.json();
-		applyAndRender();
+		try {
+			const res = await fetch(url, { headers: getAuthHeaders() });
+			if (!res.ok) {
+				const text = await res.text().catch(()=>null);
+				console.error('Fetch games failed', res.status, text);
+				alert('Failed to fetch games: ' + (text || res.status));
+				db = [];
+				applyAndRender();
+				return;
+			}
+			const json = await res.json().catch(()=>null);
+			if (!Array.isArray(json)) {
+				console.error('Invalid response from /api/games', json);
+				alert('Invalid server response');
+				db = [];
+			} else {
+				db = json;
+			}
+			if (DEBUG) {
+				console.log('fetched DB:', db);
+				const dbg = document.getElementById('debugInfo');
+				dbg.style.display = 'block';
+				dbg.textContent = `Entries: ${db.length} (approved=${db.filter(e=>e.status==='approved').length}, pending=${db.filter(e=>e.status==='pending').length})`;
+			}
+			applyAndRender();
+		} catch (err) {
+			console.error('Network error fetching games', err);
+			alert('Network error fetching games: ' + err.message);
+			db = [];
+			applyAndRender();
+		}
 	}
 
 	function uniqueConsoles() {
