@@ -156,11 +156,26 @@
 		if (pendingSection) pendingSection.classList.toggle('hidden', !isAdmin);
 	}
 
-	// robust status check: support strings (case-insensitive) and booleans
+	// robust status check: support strings (case-insensitive), booleans, and approved/pending flags
 	function statusIs(item, want) {
+		if (!item) return false;
 		const s = item && item.status;
+		// string status
 		if (typeof s === 'string') return s.toLowerCase() === String(want).toLowerCase();
+		// boolean status (true/false)
 		if (typeof s === 'boolean') return (want === 'approved') ? s === true : s === false;
+		// explicit flags: approved/pending booleans
+		if (want === 'approved') {
+			if (item.approved === true) return true;
+			if (item.pending === false) return true;
+			// maybe status missing but there's an 'state' or other flag? fallthrough to false
+			return false;
+		}
+		if (want === 'pending') {
+			if (item.pending === true) return true;
+			if (item.approved === false) return true;
+			return false;
+		}
 		return false;
 	}
 
@@ -218,7 +233,10 @@
 				console.log('fetched DB:', db);
 				const dbg = document.getElementById('debugInfo');
 				dbg.style.display = 'block';
-				dbg.textContent = `Entries: ${db.length} (approved=${db.filter(e=>e.status==='approved').length}, pending=${db.filter(e=>e.status==='pending').length})`;
+				const approvedCount = db.filter(e => statusIs(e, 'approved')).length;
+				const pendingCount = db.filter(e => statusIs(e, 'pending')).length;
+				console.log(`detected counts: approved=${approvedCount}, pending=${pendingCount}`);
+				dbg.textContent = `Entries: ${db.length} (approved=${approvedCount}, pending=${pendingCount})`;
 			}
 			applyAndRender();
 		} catch (err) {
@@ -438,12 +456,13 @@
 
 	// renderConsoleOptions: use visible entries (admins see pending as well)
 	function renderConsoleOptions() {
-		const list = (isAdmin ? db : db.filter(x => x.status === 'approved')).map(x => x.console).filter(Boolean);
+		const source = isAdmin ? db : db.filter(x => statusIs(x, 'approved'));
+		const list = source.map(x => x.console).filter(Boolean);
 		const set = new Set(list);
 		const arr = Array.from(set).sort();
 		el.consoleSelect.innerHTML = '<option value="">All consoles</option>';
 		arr.forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.textContent = c; el.consoleSelect.appendChild(opt); });
-		const years = (isAdmin ? db : db.filter(x => x.status === 'approved')).map(x => x.year).filter(y => Number.isFinite(y));
+		const years = (isAdmin ? db : db.filter(x => statusIs(x, 'approved'))).map(x => x.year).filter(y => Number.isFinite(y));
 		if (years.length) { el.minYear.placeholder = Math.min(...years); el.maxYear.placeholder = Math.max(...years); }
 	}
 
