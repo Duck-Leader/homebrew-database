@@ -1,0 +1,24 @@
+{
+  "games": [
+    {
+      "id": 1,
+      "title": "Solar Blaze",
+      "console": "NES",
+      "year": 2019,
+      "developer": "RetroDev",
+      "description": "Side-scrolling shooter homebrew.",
+      "downloadUrl": "",
+      "status": "approved"
+    },
+    {
+      "id": 2,
+      "title": "Pixel Quest",
+      "console": "Game Boy",
+      "year": 2021,
+      "developer": "IndieTeam",
+      "description": "An RPG made for old hardware.",
+      "downloadUrl": "",
+      "status": "pending"
+    }
+  ]
+}

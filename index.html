@@ -26,7 +26,7 @@
 	header { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:16px; }
 	h1 { font-size:1.25rem; margin:0; color:#bfe8ff; letter-spacing:0.2px; }
 	.controls { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
-	input[type="search"], select, input[type="number"], textarea {
+	input[type="search"], input[type="text"], input[type="url"], select, input[type="number"], textarea {
 		background: rgba(255,255,255,0.02);
 		border: 1px solid rgba(255,255,255,0.05);
 		color: #e6f7ff;
@@ -35,8 +35,8 @@
 		outline: none;
 		transition: box-shadow .12s, border-color .12s, transform .06s;
 	}
-	input::placeholder, textarea::placeholder { color: rgba(230,247,255,0.45); }
-	input[type="search"]:focus, select:focus, input[type="number"]:focus, textarea:focus {
+	input::placeholder, textarea::placeholder { color: black; }
+	input[type="search"]:focus, input[type="text"]:focus, input[type="url"]:focus, select:focus, input[type="number"]:focus, textarea:focus {
 		box-shadow: 0 6px 18px rgba(30,120,220,0.12);
 		border-color: rgba(124,195,255,0.6);
 		transform: translateY(-1px);
@@ -93,6 +93,46 @@
 		.controls { gap:6px; }
 		button { padding:7px 10px; }
 	}
+
+	/* make native select dropdown show dark-on-light for readability */
+	select {
+		/* keep the styled control but use light dropdown colors */
+		background: #ffffff;
+		color: #000000;
+	}
+	select option {
+		background: #ffffff;
+		color: #000000;
+	}
+	/* ensure the select still blends when closed */
+	.select-closed {
+		background: rgba(255,255,255,0.06); /* slight tint when not focused */
+		color: #e6f7ff;
+	}
+
+	/* add form styling to match cards */
+	#addForm {
+		border-radius:10px;
+		background: linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0.01));
+		border: 1px solid rgba(255,255,255,0.03);
+		padding:12px;
+		box-shadow: 0 8px 20px rgba(2,8,26,0.6);
+		margin-top: 8px;
+	}
+
+	/* file input readability */
+	input[type="file"] {
+		background: #ffffff;
+		color: #000000;
+		border: 1px solid #ccc;
+	}
+
+	/* form inputs in addForm: light background for readability */
+	#addForm input[type="text"], #addForm input[type="url"], #addForm textarea {
+		background: #ffffff;
+		color: #000000;
+		border: 1px solid #ccc;
+	}
 </style>
 </head>
 <body>
@@ -129,13 +169,13 @@
 	<form id="addForm" class="hidden" onsubmit="return false;">
 		<div style="display:flex; gap:8px; flex-wrap:wrap;">
 			<input id="title" placeholder="Title (required)" required>
-			<input id="console" placeholder="Console (e.g., NES, Genesis) (required)" required>
+			<select id="consoleSelectForm" required><option value="">Select console</option></select>
 			<input id="year" type="number" placeholder="Year (required)" style="width:110px" required>
 			<input id="developer" placeholder="Developer" >
 			<input id="downloadUrl" placeholder="Download URL (optional)" style="min-width:220px;">
 			<!-- ROM file now required -->
 			<label style="display:inline-flex; align-items:center; gap:8px;">
-				<input id="romFile" type="file" accept=".nes,.sfc,.smc,.smd,.gb,.gbc,.gba,.bin,.iso,.zip" title="Upload ROM file (required)" required>
+				<input id="romFile" type="file" accept=".nes,.sfc,.smc,.smd,.a52,.a26,.a78,.sms,.n64,.gdi,.ws,.wsc,.v64,.z64,.gb,.gbc,.gba,.bin,.iso,.zip" title="Upload ROM file (required)" required>
 				<span class="small">ROM file (required)</span>
 			</label>
 			<!-- publish immediately option (admin only) -->
@@ -194,10 +234,14 @@
 		downloadUrl: document.getElementById('downloadUrl'),
 		description: document.getElementById('description'),
 		romFile: document.getElementById('romFile'),
-		searchInput: document.getElementById('searchInput')
+		searchInput: document.getElementById('searchInput'),
+		consoleSelectForm: document.getElementById('consoleSelectForm')
 	};
 	let db = []; // always fetched from server
 	let filters = { q: '', console: '', minYear: null, maxYear: null };
+
+	// keep a persistent set of known consoles so filtering doesn't remove other options
+	const knownConsoles = new Set();
 
 	// demo admin token (DEMO ONLY). Replace with proper auth in a real app.
 	const ADMIN_TOKEN = 'admin-demo-token';
@@ -229,9 +273,11 @@
 		const exportBtn = document.getElementById('exportBtn');
 		const importBtn = document.getElementById('importBtn');
 		const importFile = document.getElementById('importFile');
+		const resetBtn = document.getElementById('resetBtn');
 		if (exportBtn) exportBtn.style.display = isAdmin ? 'inline-block' : 'none';
 		if (importBtn) importBtn.style.display = isAdmin ? 'inline-block' : 'none';
 		if (importFile) importFile.disabled = !isAdmin;
+		if (resetBtn) resetBtn.style.display = isAdmin ? 'inline-block' : 'none';
 	}
 
 	// robust status check: support strings (case-insensitive), booleans, and approved/pending flags
@@ -260,6 +306,8 @@
 		return false;
 	}
 
+	function applyAndRender() { updateAdminUI(); renderConsoleOptions(); renderResults(); }
+
 	// fetch list from server (server supports filtering)
 	async function fetchGames() {
 		const params = new URLSearchParams();
@@ -282,33 +330,37 @@
 			}
 			const json = await res.json().catch(()=>null);
 			// accept plain arrays or common wrapped shapes: { games: [...], data: [...], ... }
+			let newDb = [];
 			if (Array.isArray(json)) {
-				db = json;
+				newDb = json;
 			} else if (json && typeof json === 'object') {
-				// If server returns separate approved/pending arrays, prefer that shape
 				if (Array.isArray(json.approved) || Array.isArray(json.pending)) {
 					const approved = Array.isArray(json.approved) ? json.approved : [];
 					const pending = Array.isArray(json.pending) ? json.pending : [];
-					db = approved.concat(pending);
+					newDb = approved.concat(pending);
 				} else if (Array.isArray(json.data)) {
-					db = json.data;
+					newDb = json.data;
 				} else if (Array.isArray(json.games)) {
-					db = json.games;
+					newDb = json.games;
 				} else {
-					// fallback: take the first array-valued property if any
 					const arrProp = Object.keys(json).find(k => Array.isArray(json[k]));
-					if (arrProp) db = json[arrProp];
+					if (arrProp) newDb = json[arrProp];
 					else {
 						console.error('Invalid response from /api/games', json);
 						alert('Invalid server response');
-						db = [];
+						newDb = [];
 					}
 				}
 			} else {
 				console.error('Invalid response from /api/games', json);
 				alert('Invalid server response');
-				db = [];
+				newDb = [];
 			}
+
+			// update persistent knownConsoles set (don't clear it here)
+			(newDb || []).forEach(item => { if (item && item.console) knownConsoles.add(item.console); });
+
+			db = newDb;
 
 			if (DEBUG) {
 				console.log('fetched DB:', db);
@@ -343,12 +395,14 @@
 		approved.forEach(it => {
 			const div = document.createElement('div'); div.className = 'card';
 			const downloadLink = it.fileName ? `<a href="/api/games/${it.id}/file" download="${encodeURIComponent(it.fileName)}">Download</a>` : (it.downloadUrl ? `<a href="${escapeAttr(it.downloadUrl)}" target="_blank">Download</a>` : '');
+			const deleteBtn = isAdmin ? `<button data-id="${it.id}" class="delBtn">Delete</button>` : '';
 			div.innerHTML = `
 				<div><strong>${escapeHtml(it.title)}</strong></div>
 				<div class="meta">${escapeHtml(it.console)} • ${it.year || 'n/a'} • ${escapeHtml(it.developer || '')}</div>
 				<div class="small" style="margin-top:8px">${escapeHtml(it.description || '')}</div>
 				<div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
 					${downloadLink}
+					${deleteBtn}
 				</div>
 			`;
 			el.results.appendChild(div);
@@ -373,25 +427,27 @@
 		const pendingEl = document.getElementById('pendingSection');
 		if (!pendingEl) return;
 		if (!isAdmin) { pendingEl.classList.add('hidden'); return; }
-		const pending = db.slice().filter(it => statusIs(it, 'pending')).sort((a,b)=> (b.year||0)-(a.year||0));
+		const pending = db.slice().filter(it => it.status === 'pending').sort((a,b)=> (b.year||0)-(a.year||0));
 		if (!pending.length) { pendingEl.innerHTML = '<div class="small">No pending submissions.</div>'; pendingEl.classList.remove('hidden'); return; }
-		pendingEl.innerHTML = '';
+		let html = '';
 		pending.forEach(it => {
-			const div = document.createElement('div'); div.className = 'card';
 			const downloadLink = it.fileName ? `<a href="/api/games/${it.id}/file" download="${encodeURIComponent(it.fileName)}">Download</a>` : (it.downloadUrl ? `<a href="${escapeAttr(it.downloadUrl)}" target="_blank">Download</a>` : '');
-			div.innerHTML = `
-				<div><strong>${escapeHtml(it.title)}</strong><span class="small" style="margin-left:8px;color:#b66">pending</span></div>
-				<div class="meta">${escapeHtml(it.console)} • ${it.year || 'n/a'} • ${escapeHtml(it.developer || '')}</div>
-				<div class="small" style="margin-top:8px">${escapeHtml(it.description || '')}</div>
-				<div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-					${downloadLink}
-					<button data-id="${it.id}" class="confirmBtn">Confirm</button>
-					<button data-id="${it.id}" class="rejectBtn">Reject</button>
-					<button data-id="${it.id}" class="delBtn">Delete</button>
+			html += `
+				<div class="card">
+					<div><strong>${escapeHtml(it.title)}</strong><span class="small" style="margin-left:8px;color:#b66">pending</span></div>
+					<div class="meta">${escapeHtml(it.console)} • ${it.year || 'n/a'} • ${escapeHtml(it.developer || '')}</div>
+					<div class="small" style="margin-top:8px">${escapeHtml(it.description || '')}</div>
+					<div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+						${downloadLink}
+						<button data-id="${it.id}" class="confirmBtn">Approve</button>
+						<button data-id="${it.id}" class="rejectBtn">Reject</button>
+						<button data-id="${it.id}" class="delBtn">Delete</button>
+					</div>
 				</div>
 			`;
-			pendingEl.appendChild(div);
 		});
+		pendingEl.innerHTML = html;
+		pendingEl.classList.remove('hidden');
 		// attach pending handlers
 		document.querySelectorAll('.confirmBtn').forEach(b => {
 			b.addEventListener('click', async ev => {
@@ -506,7 +562,7 @@
 	el.addToggle.addEventListener('click', () => el.addForm.classList.toggle('hidden'));
 	el.addCancel.addEventListener('click', () => el.addForm.classList.add('hidden'));
 	el.addSave.addEventListener('click', async () => {
-		const title = el.title.value.trim(); const c = el.consoleInput.value.trim();
+		const title = el.title.value.trim(); const c = el.consoleSelectForm.value.trim();
 		const y = Number(el.year.value);
 		if (!title || !c || !Number.isFinite(y)) { alert('Please fill Title, Console and a numeric Year.'); return; }
 		// require ROM file
@@ -540,19 +596,40 @@
 		}
 	});
 
-		// renderConsoleOptions: use visible entries (admins see pending as well)
+		// renderConsoleOptions: use knownConsoles (persistent) so dropdown isn't limited by current filtered db
 		function renderConsoleOptions() {
-			const source = isAdmin ? db : db.filter(x => statusIs(x, 'approved'));
-			const list = source.map(x => x.console).filter(Boolean);
-			const set = new Set(list);
-			const arr = Array.from(set).sort();
+			// predefined list of consoles
+			const predefinedConsoles = ['NES', 'SNES', 'Sega Genesis', 'Gameboy', 'Gameboy Color', 'Gameboy Advance', 'Atari 2600', 'Atari 5200', 'Atari 7800', 'Nintendo 64', 'Sega Master System', 'Wonderswan', 'Wonderswan Color'];
+			// if there are no known consoles yet, build from db as a fallback, but prefer predefined
+			const sourceArr = predefinedConsoles.length ? predefinedConsoles : (knownConsoles.size ? Array.from(knownConsoles) : (db.map(x => x.console).filter(Boolean)));
+			const arr = Array.from(new Set(sourceArr)).filter(Boolean).sort();
 			el.consoleSelect.innerHTML = '<option value="">All consoles</option>';
 			arr.forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.textContent = c; el.consoleSelect.appendChild(opt); });
+			// keep selected value if user already chose one
+			if (filters.console) el.consoleSelect.value = filters.console;
+
+			const formSelect = document.getElementById('consoleSelectForm');
+			if (formSelect) {
+				formSelect.innerHTML = '<option value="">Select console</option>';
+				arr.forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.textContent = c; formSelect.appendChild(opt); });
+			}
+
 			const years = (isAdmin ? db : db.filter(x => statusIs(x, 'approved'))).map(x => x.year).filter(y => Number.isFinite(y));
 			if (years.length) { el.minYear.placeholder = Math.min(...years); el.maxYear.placeholder = Math.max(...years); }
 		}
 
-		function applyAndRender() { updateAdminUI(); renderConsoleOptions(); renderResults(); }
+		// make select look good when closed (blend with theme) while keeping dropdown readable
+		function syncSelectVisual() {
+			const sel = el.consoleSelect;
+			if (!sel) return;
+			if (sel.classList) {
+				if (sel === document.activeElement) sel.classList.remove('select-closed');
+				else sel.classList.add('select-closed');
+			}
+		}
+		document.addEventListener('click', syncSelectVisual);
+		document.addEventListener('focusin', syncSelectVisual);
+		document.addEventListener('focusout', syncSelectVisual);
 
 		// initial load
 		updateAdminUI();

@@ -51,6 +51,25 @@ app.get('/api/games', (req, res) => {
 	if (req.query.console) db = db.filter(x => x.console === req.query.console);
 	if (req.query.minYear) db = db.filter(x => (x.year||0) >= Number(req.query.minYear));
 	if (req.query.maxYear) db = db.filter(x => (x.year||0) <= Number(req.query.maxYear));
+
+	// Check if admin: if not, filter to only approved entries
+	const auth = req.headers.authorization || '';
+	const token = auth.split(' ')[1];
+	const adminToken = process.env.ADMIN_TOKEN;
+	const isAdmin = adminToken && token === adminToken;
+	if (!isAdmin) {
+		db = db.filter(x => {
+			// back-compat: if no status, treat as approved
+			if (x.status == null && x.approved == null && x.pending == null) return true;
+			const s = x.status;
+			if (typeof s === 'string') return s.toLowerCase() === 'approved';
+			if (typeof s === 'boolean') return s === true;
+			if (x.approved === true) return true;
+			if (x.pending === false) return true;
+			return false;
+		});
+	}
+
 	res.json(db);
 });
 
@@ -76,7 +95,8 @@ app.post('/api/games', upload.single('rom'), (req, res) => {
 			description: req.body.description || '',
 			downloadUrl: req.body.downloadUrl || '',
 			fileName: req.file ? req.file.originalname : null,
-			storedName: req.file ? req.file.filename : null
+			storedName: req.file ? req.file.filename : null,
+			status: req.body.status || 'pending'
 		};
 		db.push(item);
 		saveDb(db);
@@ -139,6 +159,12 @@ app.post('/api/games/import', (req, res) => {
 
 // POST reset -> replace with sample DB and delete uploaded files
 app.post('/api/games/reset', (req, res) => {
+	const auth = req.headers.authorization || '';
+	const token = auth.split(' ')[1];
+	const adminToken = process.env.ADMIN_TOKEN;
+	if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN not configured on the server' });
+	if (token !== adminToken) return res.status(403).json({ error: 'forbidden' });
+
 	// delete all uploaded files
 	fs.readdirSync(UPLOADS).forEach(f => { try { fs.unlinkSync(path.join(UPLOADS, f)); } catch(e){} });
 	saveDb(JSON.parse(JSON.stringify(SAMPLE_DB)));
