@@ -40,6 +40,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(__dirname)); // serve index.html
 
+// health check
+app.get('/', (req, res) => res.json({ status: 'ok' }));
+
 // GET /api/games?query filters
 app.get('/api/games', (req, res) => {
 	let db = loadDb();
@@ -142,6 +145,46 @@ app.post('/api/games/reset', (req, res) => {
 	res.json({ ok: true });
 });
 
+// --- simple file-backed entries storage ---
+const DATA_FILE = path.join(__dirname, 'data', 'entries.json');
+function ensureDataDir() {
+	const dir = path.dirname(DATA_FILE);
+	if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+function loadEntries() {
+	if (!fs.existsSync(DATA_FILE)) return [];
+	try {
+		return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8') || '[]');
+	} catch {
+		return [];
+	}
+}
+function saveEntries(entries) {
+	ensureDataDir();
+	fs.writeFileSync(DATA_FILE, JSON.stringify(entries, null, 2), 'utf8');
+}
+// --- endpoints for entries ---
+app.get('/entries', (req, res) => {
+	res.json(loadEntries());
+});
+
+// Admin delete: requires Authorization: Bearer <ADMIN_TOKEN>
+app.delete('/entries/:id', (req, res) => {
+	const auth = req.headers.authorization || '';
+	const token = auth.split(' ')[1];
+	const adminToken = process.env.ADMIN_TOKEN;
+	if (!adminToken) return res.status(500).json({ error: 'ADMIN_TOKEN not configured on the server' });
+	if (token !== adminToken) return res.status(403).json({ error: 'forbidden' });
+
+	const id = req.params.id;
+	const entries = loadEntries();
+	const idx = entries.findIndex(e => String(e.id) === String(id));
+	if (idx === -1) return res.status(404).json({ error: 'entry not found' });
+	const [deleted] = entries.splice(idx, 1);
+	saveEntries(entries);
+	res.json({ deleted });
+});
+
 (async function start() {
 	app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
 
@@ -161,3 +204,13 @@ app.post('/api/games/reset', (req, res) => {
 		console.log('Skipping DB reset on startup. To reset manually: `npm run reset-db` or start with `RESET_DB=1` or `node server.js --reset-db`.');
 	}
 })();
+
+// graceful shutdown
+const shutdown = () => {
+	server.close(() => {
+		console.log('Server closed');
+		process.exit(0);
+	});
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
