@@ -5,24 +5,94 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Homebrew ROM Database</title>
 <style>
-	/* ...existing code... */
-	body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin: 20px; color: #111; }
-	.container { max-width: 980px; margin: 0 auto; }
+	/* Sleek blue/black theme */
+	body {
+		background: linear-gradient(180deg,#031021 0%, #071425 100%);
+		color: #e6f7ff;
+		font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+		margin: 24px;
+		-webkit-font-smoothing:antialiased;
+		-moz-osx-font-smoothing:grayscale;
+	}
+	.container {
+		max-width: 980px;
+		margin: 0 auto;
+		background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+		border-radius: 12px;
+		padding: 18px;
+		box-shadow: 0 12px 30px rgba(2,6,23,0.7), inset 0 1px 0 rgba(255,255,255,0.02);
+		border: 1px solid rgba(255,255,255,0.03);
+	}
 	header { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:16px; }
-	h1 { font-size:1.2rem; margin:0; }
-	.controls { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
-	input[type="search"], select, input[type="number"] { padding:6px 8px; border:1px solid #ccc; border-radius:6px; }
-	button { padding:6px 10px; border-radius:6px; border:1px solid #bbb; background:#f7f7f7; cursor:pointer; }
+	h1 { font-size:1.25rem; margin:0; color:#bfe8ff; letter-spacing:0.2px; }
+	.controls { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
+	input[type="search"], select, input[type="number"], textarea {
+		background: rgba(255,255,255,0.02);
+		border: 1px solid rgba(255,255,255,0.05);
+		color: #e6f7ff;
+		padding:8px 10px;
+		border-radius:10px;
+		outline: none;
+		transition: box-shadow .12s, border-color .12s, transform .06s;
+	}
+	input::placeholder, textarea::placeholder { color: rgba(230,247,255,0.45); }
+	input[type="search"]:focus, select:focus, input[type="number"]:focus, textarea:focus {
+		box-shadow: 0 6px 18px rgba(30,120,220,0.12);
+		border-color: rgba(124,195,255,0.6);
+		transform: translateY(-1px);
+	}
+	button {
+		padding:8px 12px;
+		border-radius:10px;
+		border: 1px solid rgba(255,255,255,0.06);
+		background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));
+		color: #dff6ff;
+		cursor: pointer;
+		transition: transform .08s, box-shadow .08s, background .12s;
+	}
+	button:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 8px 20px rgba(4,32,64,0.45);
+	}
+	/* primary accent button */
+	button#addToggle, button#addSave {
+		background: linear-gradient(180deg,#1464d8 0%, #0f4fb2 100%);
+		border: 1px solid rgba(15,79,178,0.9);
+		color: #ffffff;
+	}
+	button#addToggle:hover, button#addSave:hover {
+		box-shadow: 0 10px 30px rgba(14,77,170,0.35);
+	}
 	.results { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:12px; margin-top:12px; }
-	.card { border:1px solid #e0e0e0; padding:10px; border-radius:6px; background:#fff; }
-	.meta { font-size:0.85rem; color:#555; margin-top:6px; }
-	.small { font-size:0.85rem; color:#444; }
+	.card {
+		border-radius:10px;
+		background: linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0.01));
+		border: 1px solid rgba(255,255,255,0.03);
+		padding:12px;
+		box-shadow: 0 8px 20px rgba(2,8,26,0.6);
+	}
+	.meta { font-size:0.88rem; color:#b9dbff; margin-top:6px; }
+	.small { font-size:0.86rem; color:#a8d6ff; }
 	.toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 	.form-inline { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-	textarea { width:100%; min-height:60px; padding:6px; border-radius:6px; border:1px solid #ccc; }
-	.footer { margin-top:18px; color:#666; font-size:0.9rem; }
-	.count { font-weight:600; }
+	textarea { width:100%; min-height:72px; padding:8px; border-radius:10px; }
+	.footer { margin-top:18px; color:#8fbfe6; font-size:0.9rem; }
+	.count { font-weight:700; color:#dff6ff; }
 	.hidden { display:none; }
+
+	/* links and accent colors */
+	a { color: #8ccfff; text-decoration: none; }
+	a:hover { text-decoration: underline; color:#bfe8ff; }
+
+	/* admin status badge */
+	#adminStatus { font-weight:600; color:#fff; background: linear-gradient(90deg,#0b67c7,#3aa0ff); padding:4px 8px; border-radius:999px; margin-left:6px; font-size:0.85rem; }
+
+	/* responsive refinements */
+	@media (max-width:600px) {
+		.container { padding:14px; margin:12px; }
+		.controls { gap:6px; }
+		button { padding:7px 10px; }
+	}
 </style>
 </head>
 <body>
