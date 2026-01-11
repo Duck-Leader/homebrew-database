@@ -154,6 +154,14 @@
 		// show/hide pending submissions group
 		const pendingSection = document.getElementById('pendingSection');
 		if (pendingSection) pendingSection.classList.toggle('hidden', !isAdmin);
+
+		// admin-only import/export controls
+		const exportBtn = document.getElementById('exportBtn');
+		const importBtn = document.getElementById('importBtn');
+		const importFile = document.getElementById('importFile');
+		if (exportBtn) exportBtn.style.display = isAdmin ? 'inline-block' : 'none';
+		if (importBtn) importBtn.style.display = isAdmin ? 'inline-block' : 'none';
+		if (importFile) importFile.disabled = !isAdmin;
 	}
 
 	// robust status check: support strings (case-insensitive), booleans, and approved/pending flags
@@ -366,11 +374,35 @@
 	});
 
 	el.exportBtn.addEventListener('click', async () => {
+		if (!isAdmin) { alert('Admin only'); return; }
 		const res = await fetch('/api/games/export', { headers: getAuthHeaders() });
 		if (!res.ok) { alert('Export failed'); return; }
 		const blob = await res.blob();
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a'); a.href = url; a.download = 'homebrew_db.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+	});
+
+	// admin-only import wiring
+	el.importBtn.addEventListener('click', () => {
+		if (!isAdmin) { alert('Admin only'); return; }
+		el.importFile.click();
+	});
+	el.importFile.addEventListener('change', async (ev) => {
+		if (!isAdmin) { alert('Admin only'); ev.target.value = ''; return; }
+		const f = ev.target.files && ev.target.files[0];
+		if (!f) return;
+		try {
+			const text = await f.text();
+			const parsed = JSON.parse(text);
+			if (!Array.isArray(parsed)) throw new Error('Invalid file format');
+			const res = await fetch('/api/games/import', { method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }, body: JSON.stringify(parsed) });
+			if (!res.ok) throw new Error('Import failed');
+			await fetchGames();
+			alert('Imported ' + parsed.length + ' entries.');
+		} catch (e) {
+			alert('Import failed: ' + e.message);
+		}
+		ev.target.value = '';
 	});
 
 	// admin login/logout
@@ -391,25 +423,6 @@
 		} else {
 			alert('Invalid token.');
 		}
-	});
-
-	// import JSON file -> POST /api/games/import
-	el.importBtn.addEventListener('click', () => el.importFile.click());
-	el.importFile.addEventListener('change', async (ev) => {
-		const f = ev.target.files && ev.target.files[0];
-		if (!f) return;
-		try {
-			const text = await f.text();
-			const parsed = JSON.parse(text);
-			if (!Array.isArray(parsed)) throw new Error('Invalid file format');
-			const res = await fetch('/api/games/import', { method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }, body: JSON.stringify(parsed) });
-			if (!res.ok) throw new Error('Import failed');
-			await fetchGames();
-			alert('Imported ' + parsed.length + ' entries.');
-		} catch (e) {
-			alert('Import failed: ' + e.message);
-		}
-		ev.target.value = '';
 	});
 
 	el.resetBtn.addEventListener('click', async () => {
@@ -457,23 +470,23 @@
 		}
 	});
 
-	// renderConsoleOptions: use visible entries (admins see pending as well)
-	function renderConsoleOptions() {
-		const source = isAdmin ? db : db.filter(x => statusIs(x, 'approved'));
-		const list = source.map(x => x.console).filter(Boolean);
-		const set = new Set(list);
-		const arr = Array.from(set).sort();
-		el.consoleSelect.innerHTML = '<option value="">All consoles</option>';
-		arr.forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.textContent = c; el.consoleSelect.appendChild(opt); });
-		const years = (isAdmin ? db : db.filter(x => statusIs(x, 'approved'))).map(x => x.year).filter(y => Number.isFinite(y));
-		if (years.length) { el.minYear.placeholder = Math.min(...years); el.maxYear.placeholder = Math.max(...years); }
-	}
+		// renderConsoleOptions: use visible entries (admins see pending as well)
+		function renderConsoleOptions() {
+			const source = isAdmin ? db : db.filter(x => statusIs(x, 'approved'));
+			const list = source.map(x => x.console).filter(Boolean);
+			const set = new Set(list);
+			const arr = Array.from(set).sort();
+			el.consoleSelect.innerHTML = '<option value="">All consoles</option>';
+			arr.forEach(c => { const opt = document.createElement('option'); opt.value = c; opt.textContent = c; el.consoleSelect.appendChild(opt); });
+			const years = (isAdmin ? db : db.filter(x => statusIs(x, 'approved'))).map(x => x.year).filter(y => Number.isFinite(y));
+			if (years.length) { el.minYear.placeholder = Math.min(...years); el.maxYear.placeholder = Math.max(...years); }
+		}
 
-	function applyAndRender() { updateAdminUI(); renderConsoleOptions(); renderResults(); }
+		function applyAndRender() { updateAdminUI(); renderConsoleOptions(); renderResults(); }
 
-	// initial load
-	updateAdminUI();
-	fetchGames();
-</script>
+		// initial load
+		updateAdminUI();
+		fetchGames();
+	</script>
 </body>
 </html>
