@@ -12,10 +12,10 @@ const PORT = process.env.PORT || 3000;
 if (!fs.existsSync(UPLOADS)) fs.mkdirSync(UPLOADS, { recursive: true });
 
 const SAMPLE_DB = [
-	{ id: 1, title: "Solar Blaze", console: "NES", year: 2019, developer: "RetroDev", description: "Side-scrolling shooter homebrew.", downloadUrl: "" },
-	{ id: 2, title: "Pixel Quest", console: "Game Boy", year: 2021, developer: "IndieTeam", description: "An RPG made for old hardware.", downloadUrl: "" },
-	{ id: 3, title: "Mega Kart Homebrew", console: "Genesis", year: 2018, developer: "KartLab", description: "Arcade racing on classic console.", downloadUrl: "" },
-	{ id: 4, title: "StarForth", console: "NES", year: 2023, developer: "NewWave", description: "Platformer in the style of classic 8-bit.", downloadUrl: "" }
+	{ id: 1, title: "Solar Blaze", console: "NES", year: 2019, developer: "RetroDev", description: "Side-scrolling shooter homebrew.", downloadUrl: "", status: "approved" },
+	{ id: 2, title: "Pixel Quest", console: "Game Boy", year: 2021, developer: "IndieTeam", description: "An RPG made for old hardware.", downloadUrl: "", status: "approved" },
+	{ id: 3, title: "Mega Kart Homebrew", console: "Genesis", year: 2018, developer: "KartLab", description: "Arcade racing on classic console.", downloadUrl: "", status: "approved" },
+	{ id: 4, title: "StarForth", console: "NES", year: 2023, developer: "NewWave", description: "Platformer in the style of classic 8-bit.", downloadUrl: "", status: "approved" }
 ];
 
 function loadDb() {
@@ -37,6 +37,7 @@ const upload = multer({
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(__dirname)); // serve index.html
 
@@ -51,6 +52,7 @@ app.get('/api/games', (req, res) => {
 	if (req.query.console) db = db.filter(x => x.console === req.query.console);
 	if (req.query.minYear) db = db.filter(x => (x.year||0) >= Number(req.query.minYear));
 	if (req.query.maxYear) db = db.filter(x => (x.year||0) <= Number(req.query.maxYear));
+	if (req.query.status) db = db.filter(x => x.status === req.query.status);
 
 	// Check if admin: if not, filter to only approved entries
 	const auth = req.headers.authorization || '';
@@ -104,8 +106,29 @@ app.post('/api/games', upload.single('rom'), (req, res) => {
 	} catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PATCH /api/games/:id (admin only: update status)
+app.patch('/api/games/:id', (req, res) => {
+	const auth = req.headers.authorization || '';
+	const token = auth.split(' ')[1];
+	const adminToken = process.env.ADMIN_TOKEN || 'demo';
+	if (token !== adminToken) return res.status(403).json({ error: 'forbidden' });
+
+	const id = Number(req.params.id);
+	const db = loadDb();
+	const entry = db.find(x => x.id === id);
+	if (!entry) return res.status(404).json({ error: 'Not found' });
+	if (req.body.status) entry.status = req.body.status;
+	saveDb(db);
+	res.json(entry);
+});
+
 // DELETE /api/games/:id
 app.delete('/api/games/:id', (req, res) => {
+	const auth = req.headers.authorization || '';
+	const token = auth.split(' ')[1];
+	const adminToken = process.env.ADMIN_TOKEN || 'demo';
+	if (token !== adminToken) return res.status(403).json({ error: 'forbidden' });
+
 	const id = Number(req.params.id);
 	let db = loadDb();
 	const entry = db.find(x => x.id === id);
@@ -133,6 +156,11 @@ app.get('/api/games/:id/file', (req, res) => {
 
 // GET export
 app.get('/api/games/export', (req, res) => {
+	const auth = req.headers.authorization || '';
+	const token = auth.split(' ')[1];
+	const adminToken = process.env.ADMIN_TOKEN || 'demo';
+	if (token !== adminToken) return res.status(403).json({ error: 'forbidden' });
+
 	const db = loadDb();
 	res.setHeader('Content-Type', 'application/json');
 	res.send(JSON.stringify(db, null, 2));
@@ -140,6 +168,11 @@ app.get('/api/games/export', (req, res) => {
 
 // POST import (JSON body array) - replaces DB (files aren't imported)
 app.post('/api/games/import', (req, res) => {
+	const auth = req.headers.authorization || '';
+	const token = auth.split(' ')[1];
+	const adminToken = process.env.ADMIN_TOKEN || 'demo';
+	if (token !== adminToken) return res.status(403).json({ error: 'forbidden' });
+
 	const parsed = req.body;
 	if (!Array.isArray(parsed)) return res.status(400).json({ error: 'Invalid payload' });
 	const db = parsed.map((x, i) => ({
@@ -151,7 +184,8 @@ app.post('/api/games/import', (req, res) => {
 		description: x.description || '',
 		downloadUrl: x.downloadUrl || '',
 		fileName: null,
-		storedName: null
+		storedName: null,
+		status: x.status || 'approved'
 	}));
 	saveDb(db);
 	res.json({ ok: true, count: db.length });
